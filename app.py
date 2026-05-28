@@ -1,0 +1,616 @@
+"""
+Customer Churn Prediction - Streamlit Application
+
+A web application for predicting customer churn using machine learning.
+
+Run this app with:
+    streamlit run app.py
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import os
+import sys
+import plotly.express as px
+import plotly.graph_objects as go
+from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from src.data_loader import load_telco_data, get_dataset_info
+from src.feature_engineering import encode_categorical_features, scale_features, engineer_features
+
+# Configuration
+st.set_page_config(
+    page_title="Customer Churn Prediction",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+    <style>
+    .main-header {
+        color: #1f77b4;
+        text-align: center;
+        padding: 20px;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .prediction-card {
+        background-color: #e8f4f8;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 5px solid #1f77b4;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
+@st.cache_resource
+def load_model_and_scaler():
+    """Load the trained model and scaler."""
+    try:
+        model = joblib.load('models/best_churn_model.pkl')
+        scaler = joblib.load('models/best_churn_model_scaler.pkl')
+        feature_names = joblib.load('models/best_churn_model_features.pkl')
+        # Try to load the template if it exists
+        try:
+            template_df = joblib.load('models/best_churn_model_template.pkl')
+        except:
+            template_df = None
+        return model, scaler, feature_names, template_df
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        st.info("Please run `python train_model.py` first to train and save the model.")
+        return None, None, None, None
+
+
+@st.cache_data
+def load_dataset():
+    """Load the dataset for analysis."""
+    try:
+        df = load_telco_data('data/WA_Fn-UseC_-_Telco_Customer_Churn.csv')
+        return df
+    except Exception as e:
+        st.error(f"❌ Error loading dataset: {str(e)}")
+        return None
+
+
+def prepare_prediction_data(customer_data, template_df=None, expected_columns=None):
+    """Prepare customer data for prediction using template structure.
+    
+    Args:
+        customer_data: Dictionary with customer information
+        template_df: DataFrame template with correct column structure (optional)
+        expected_columns: List of column names to align with (from training)
+    
+    Returns:
+        DataFrame with properly encoded features
+    """
+    from sklearn.preprocessing import LabelEncoder
+    
+    # If template is provided, use it to ensure proper structure
+    if template_df is not None:
+        X = pd.DataFrame([customer_data])
+        X, _ = engineer_features(X, None)
+        
+        # Get categorical columns
+        categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+        
+        # Binary categorical features - label encode
+        binary_cols = [col for col in categorical_cols if col not in ['TenureSegment'] and X[col].nunique() == 2]
+        for col in binary_cols:
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col])
+        
+        # One-hot encode multi-class (WITHOUT drop_first to get all possible columns)
+        multiclass_cols = [col for col in categorical_cols if col not in binary_cols]
+        if multiclass_cols:
+            X = pd.get_dummies(X, columns=multiclass_cols, drop_first=False)
+        
+        # Add missing columns that exist in template
+        for col in expected_columns:
+            if col not in X.columns:
+                X[col] = 0
+        
+        # Select only template columns in template order
+        X = X[expected_columns]
+        
+        return X
+    
+    # Fallback: use expected_columns if template not available
+    X = pd.DataFrame([customer_data])
+    X, _ = engineer_features(X, None)
+    
+    categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+    binary_cols = [col for col in categorical_cols if col not in ['TenureSegment'] and X[col].nunique() == 2]
+    for col in binary_cols:
+        le = LabelEncoder()
+        X[col] = le.fit_transform(X[col])
+    
+    multiclass_cols = [col for col in categorical_cols if col not in binary_cols]
+    if multiclass_cols:
+        X = pd.get_dummies(X, columns=multiclass_cols, drop_first=False)
+    
+    if expected_columns is not None:
+        for col in expected_columns:
+            if col not in X.columns:
+                X[col] = 0
+        # Remove extra columns
+        X = X[[col for col in X.columns if col in expected_columns]]
+        X = X[expected_columns]
+    
+    return X
+
+
+def page_overview():
+    """Home/Overview page."""
+    st.markdown("<h1 class='main-header'>🔮 Customer Churn Prediction</h1>", 
+                unsafe_allow_html=True)
+    
+    st.markdown("""
+    ### Welcome to the Customer Churn Prediction System
+    
+    This application uses **machine learning** to predict which customers are likely to churn
+    (cancel their subscription) based on their characteristics and behavior.
+    
+    **Key Features:**
+    - 📊 **Project Overview** - Understand the dataset and business problem
+    - 📈 **Churn Insights** - Explore patterns in customer churn
+    - 🎯 **Make Predictions** - Predict churn for individual customers
+    - 📋 **Model Details** - Learn about the model's performance
+    """)
+    
+    # Key metrics
+    st.markdown("### 📊 Dataset Overview")
+    
+    df = load_dataset()
+    if df is not None:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Customers", f"{len(df):,}")
+        
+        with col2:
+            churn_count = (df['Churn'] == 'Yes').sum()
+            st.metric("Churned Customers", f"{churn_count:,}")
+        
+        with col3:
+            churn_rate = (df['Churn'] == 'Yes').sum() / len(df)
+            st.metric("Churn Rate", f"{churn_rate:.2%}")
+        
+        with col4:
+            avg_tenure = df['tenure'].mean()
+            st.metric("Avg. Tenure", f"{avg_tenure:.1f} months")
+    
+    st.markdown("---")
+    
+    # Navigation instructions
+    st.markdown("""
+    ### 🚀 Getting Started
+    
+    1. **Explore Insights** - Navigate to the "Churn Insights" tab to analyze churn patterns
+    2. **Make Predictions** - Go to the "Make Prediction" tab to predict churn for a customer
+    3. **View Model Details** - Check the "Model Details" tab for performance metrics
+    4. **Review Data** - Visit the "Data Overview" tab to explore the full dataset
+    """)
+
+
+def page_churn_insights():
+    """Churn insights and analysis page."""
+    st.markdown("<h1 class='main-header'>📈 Churn Insights</h1>", unsafe_allow_html=True)
+    
+    df = load_dataset()
+    if df is None:
+        return
+    
+    # Churn distribution
+    st.markdown("### Churn Distribution")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        churn_counts = df['Churn'].value_counts()
+        fig = go.Figure(data=[
+            go.Pie(
+                labels=['No Churn', 'Churn'],
+                values=[churn_counts['No'], churn_counts['Yes']],
+                marker=dict(colors=['#2ecc71', '#e74c3c']),
+                hole=0.3
+            )
+        ])
+        fig.update_layout(
+            title="Churn Distribution",
+            height=400,
+            showlegend=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        churn_pct = (df['Churn'].value_counts() / len(df) * 100).round(2)
+        metrics_data = {
+            'Status': ['No Churn', 'Churn'],
+            'Count': [churn_counts['No'], churn_counts['Yes']],
+            'Percentage': [f"{churn_pct['No']:.1f}%", f"{churn_pct['Yes']:.1f}%"]
+        }
+        st.dataframe(pd.DataFrame(metrics_data), hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Churn by key factors
+    st.markdown("### Churn by Key Factors")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if 'Contract' in df.columns:
+            contract_churn = pd.crosstab(df['Contract'], df['Churn'])
+            contract_churn_pct = (contract_churn['Yes'] / (contract_churn['No'] + contract_churn['Yes']) * 100).round(2)
+            
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=contract_churn_pct.index,
+                    y=contract_churn_pct.values,
+                    marker=dict(color='#e74c3c'),
+                    text=[f"{v:.1f}%" for v in contract_churn_pct.values],
+                    textposition='outside'
+                )
+            ])
+            fig.update_layout(
+                title="Churn Rate by Contract Type",
+                xaxis_title="Contract Type",
+                yaxis_title="Churn Rate (%)",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        if 'InternetService' in df.columns:
+            internet_churn = pd.crosstab(df['InternetService'], df['Churn'])
+            internet_churn_pct = (internet_churn['Yes'] / (internet_churn['No'] + internet_churn['Yes']) * 100).round(2)
+            
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=internet_churn_pct.index,
+                    y=internet_churn_pct.values,
+                    marker=dict(color='#9b59b6'),
+                    text=[f"{v:.1f}%" for v in internet_churn_pct.values],
+                    textposition='outside'
+                )
+            ])
+            fig.update_layout(
+                title="Churn Rate by Internet Service",
+                xaxis_title="Internet Service",
+                yaxis_title="Churn Rate (%)",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Tenure analysis
+    st.markdown("### Tenure Impact on Churn")
+    
+    fig = go.Figure()
+    
+    for churn_status in ['No', 'Yes']:
+        fig.add_trace(go.Histogram(
+            x=df[df['Churn'] == churn_status]['tenure'],
+            name='Churn' if churn_status == 'Yes' else 'No Churn',
+            opacity=0.7,
+            marker=dict(color='#e74c3c' if churn_status == 'Yes' else '#2ecc71')
+        ))
+    
+    fig.update_layout(
+        title="Tenure Distribution by Churn Status",
+        xaxis_title="Tenure (months)",
+        yaxis_title="Number of Customers",
+        barmode='overlay',
+        height=400
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def page_prediction():
+    """Customer churn prediction page."""
+    st.markdown("<h1 class='main-header'>🎯 Make Prediction</h1>", unsafe_allow_html=True)
+    
+    model, scaler, feature_names, template_df = load_model_and_scaler()
+    if model is None or scaler is None:
+        return
+    
+    st.markdown("### Enter Customer Information")
+    
+    # Create input form
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Demographics")
+        gender = st.selectbox("Gender", ["Male", "Female"])
+        senior_citizen = st.selectbox("Senior Citizen", ["No", "Yes"])
+        partner = st.selectbox("Has Partner", ["Yes", "No"])
+        dependents = st.selectbox("Has Dependents", ["Yes", "No"])
+    
+    with col2:
+        st.subheader("Account Information")
+        tenure = st.slider("Tenure (months)", 0, 72, 12)
+        phone_service = st.selectbox("Phone Service", ["Yes", "No"])
+        paperless_billing = st.selectbox("Paperless Billing", ["Yes", "No"])
+    
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Services")
+        internet_service = st.selectbox("Internet Service", 
+                                       ["No", "DSL", "Fiber optic"])
+        online_security = st.selectbox("Online Security", 
+                                      ["No internet service", "Yes", "No"])
+        online_backup = st.selectbox("Online Backup", 
+                                    ["No internet service", "Yes", "No"])
+    
+    with col2:
+        st.subheader("Billing")
+        monthly_charges = st.number_input("Monthly Charges ($)", 18.25, 118.75, 65.0, 0.25)
+        total_charges = st.number_input("Total Charges ($)", 0.0, 8684.8, 1500.0, 10.0)
+        contract = st.selectbox("Contract Type", 
+                               ["Month-to-month", "One year", "Two year"])
+    
+    st.markdown("---")
+    
+    # Make prediction
+    if st.button("🔮 Predict Churn", use_container_width=True, key="predict_btn"):
+        
+        # Prepare customer data
+        customer_data = {
+            'gender': gender,
+            'SeniorCitizen': 1 if senior_citizen == 'Yes' else 0,
+            'Partner': partner,
+            'Dependents': dependents,
+            'tenure': tenure,
+            'PhoneService': phone_service,
+            'InternetService': internet_service,
+            'OnlineSecurity': online_security,
+            'OnlineBackup': online_backup,
+            'PaperlessBilling': paperless_billing,
+            'MonthlyCharges': monthly_charges,
+            'TotalCharges': total_charges,
+            'Contract': contract,
+        }
+        
+        try:
+            # Load model and template
+            model, scaler, feature_names, template_df = load_model_and_scaler()
+            if model is None:
+                return
+            
+            # Prepare data for model with template
+            X = prepare_prediction_data(customer_data, template_df=template_df, expected_columns=feature_names)
+            
+            # Scale ONLY the numeric features that the scaler expects
+            scaler_features = list(scaler.feature_names_in_)
+            X_numeric = X[scaler_features].copy()
+            X_scaled_numeric = pd.DataFrame(scaler.transform(X_numeric), columns=scaler_features)
+            
+            # Create a copy of X for the final scaled data
+            X_scaled = X.copy()
+            X_scaled[scaler_features] = X_scaled_numeric
+            
+            # Make prediction
+            prediction = model.predict(X_scaled)[0]
+            probability = model.predict_proba(X_scaled)[0]
+            
+            # Display results
+            st.markdown("---")
+            st.markdown("### 📊 Prediction Result")
+            
+            if prediction == 1:
+                churn_status = "⚠️ **HIGH RISK** - Likely to Churn"
+                color = "#e74c3c"
+                prob_label = "Churn Probability"
+                prob_value = probability[1]
+            else:
+                churn_status = "✅ **LOW RISK** - Unlikely to Churn"
+                color = "#2ecc71"
+                prob_label = "Retention Probability"
+                prob_value = probability[0]
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"""
+                <div style='background-color: {color}; padding: 20px; border-radius: 10px; text-align: center;'>
+                    <h2 style='color: white; margin: 0;'>{churn_status}</h2>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.metric(prob_label, f"{prob_value:.1%}")
+            
+            # Probability breakdown
+            st.markdown("### Prediction Confidence")
+            
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=['No Churn', 'Churn'],
+                    y=[probability[0], probability[1]],
+                    marker=dict(color=['#2ecc71', '#e74c3c']),
+                    text=[f"{probability[0]:.1%}", f"{probability[1]:.1%}"],
+                    textposition='outside'
+                )
+            ])
+            fig.update_layout(
+                title="Prediction Probability",
+                yaxis_title="Probability",
+                height=300,
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Recommendations
+            st.markdown("### 💡 Recommendations")
+            
+            if prediction == 1:
+                st.warning("""
+                **This customer is at risk of churning. Consider:**
+                - Offering special promotions or discounts
+                - Contacting the customer to address concerns
+                - Improving service quality or support
+                - Providing personalized offers based on their usage
+                """)
+            else:
+                st.success("""
+                **This customer is satisfied. Continue to:**
+                - Maintain current service quality
+                - Monitor for any changes in behavior
+                - Offer relevant upsell opportunities
+                - Encourage loyalty programs
+                """)
+        
+        except Exception as e:
+            st.error(f"❌ Error making prediction: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+
+
+def page_model_details():
+    """Model performance details page."""
+    st.markdown("<h1 class='main-header'>📋 Model Details</h1>", unsafe_allow_html=True)
+    
+    # Load comparison data
+    comparison_file = 'reports/model_comparison.csv'
+    if os.path.exists(comparison_file):
+        comparison_df = pd.read_csv(comparison_file)
+        
+        st.markdown("### Model Performance Comparison")
+        st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+    
+    # Load feature importance
+    importance_file = 'reports/feature_importance.csv'
+    if os.path.exists(importance_file):
+        st.markdown("---")
+        st.markdown("### Top 15 Feature Importance")
+        
+        importance_df = pd.read_csv(importance_file)
+        
+        fig = go.Figure(data=[
+            go.Bar(
+                y=importance_df['Feature'],
+                x=importance_df['Importance'],
+                orientation='h',
+                marker=dict(color='#3498db')
+            )
+        ])
+        fig.update_layout(
+            title="Feature Importance (Random Forest)",
+            xaxis_title="Importance Score",
+            yaxis_title="Feature",
+            height=500,
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("**Interpretation:**")
+        top_features = importance_df.head(3)['Feature'].tolist()
+        st.info(f"""
+        The most important features for predicting churn are:
+        1. {top_features[0]}
+        2. {top_features[1]}
+        3. {top_features[2]}
+        
+        These features have the greatest influence on the model's predictions.
+        """)
+
+
+def page_data_overview():
+    """Data overview page."""
+    st.markdown("<h1 class='main-header'>📊 Data Overview</h1>", unsafe_allow_html=True)
+    
+    df = load_dataset()
+    if df is None:
+        return
+    
+    st.markdown("### Dataset Statistics")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Records", f"{len(df):,}")
+    with col2:
+        st.metric("Total Features", len(df.columns))
+    with col3:
+        st.metric("Missing Values", df.isnull().sum().sum())
+    
+    st.markdown("---")
+    
+    st.markdown("### Dataset Preview")
+    st.dataframe(df.head(10), use_container_width=True)
+    
+    st.markdown("---")
+    
+    st.markdown("### Numerical Features Summary")
+    st.dataframe(df.describe(), use_container_width=True)
+    
+    st.markdown("---")
+    
+    st.markdown("### Categorical Features")
+    categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+    
+    for col in categorical_cols:
+        st.markdown(f"**{col}**")
+        value_counts = df[col].value_counts()
+        st.dataframe(value_counts, use_container_width=True)
+
+
+# Sidebar navigation
+def main():
+    """Main app function."""
+    st.sidebar.markdown("<h1 style='text-align: center'>Navigation</h1>", unsafe_allow_html=True)
+    
+    page = st.sidebar.radio(
+        "Select a page:",
+        ["🏠 Overview", "📈 Churn Insights", "🎯 Make Prediction", 
+         "📋 Model Details", "📊 Data Overview"]
+    )
+    
+    if page == "🏠 Overview":
+        page_overview()
+    elif page == "📈 Churn Insights":
+        page_churn_insights()
+    elif page == "🎯 Make Prediction":
+        page_prediction()
+    elif page == "📋 Model Details":
+        page_model_details()
+    elif page == "📊 Data Overview":
+        page_data_overview()
+    
+    # Sidebar info
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+    ### 📌 Project Info
+    
+    **Customer Churn Prediction**
+    
+    A machine learning project to predict which telecom customers are likely to churn.
+    
+    **Technologies:**
+    - Python
+    - Scikit-learn
+    - Streamlit
+    - Plotly
+    
+    **Dataset:** Telco Customer Churn
+    """)
+
+
+if __name__ == "__main__":
+    main()
