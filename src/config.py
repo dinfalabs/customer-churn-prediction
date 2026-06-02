@@ -11,15 +11,17 @@ from pathlib import Path
 # PROJECT PATHS
 # ============================================================================
 
-PROJECT_ROOT = Path(__file__).parent
+# config.py lives in src/, so the project root is its parent's parent.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / 'data'
 MODELS_DIR = PROJECT_ROOT / 'models'
 NOTEBOOKS_DIR = PROJECT_ROOT / 'notebooks'
 SCREENSHOTS_DIR = PROJECT_ROOT / 'screenshots'
+REPORTS_DIR = PROJECT_ROOT / 'reports'
 
-# Create directories if they don't exist
-for directory in [DATA_DIR, MODELS_DIR, NOTEBOOKS_DIR, SCREENSHOTS_DIR]:
-    directory.mkdir(exist_ok=True)
+# NOTE: directories are intentionally NOT created at import time. Creating
+# filesystem side effects on `import config` previously spawned empty src/data,
+# src/models, ... folders. Create dirs explicitly where you actually write.
 
 # ============================================================================
 # DATA CONFIGURATION

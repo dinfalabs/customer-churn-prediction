@@ -11,16 +11,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import json
+import logging
 import os
 import sys
 import plotly.express as px
 import plotly.graph_objects as go
-from pathlib import Path
 
-# Add src to path
+# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from src.data_loader import load_telco_data, get_dataset_info
-from src.feature_engineering import encode_categorical_features, scale_features, engineer_features
+from src.data_loader import load_telco_data
+# FeatureEngineer must be importable so joblib can reconstruct the saved pipeline.
+from src.pipeline import FeatureEngineer  # noqa: F401
 
 # Configuration
 st.set_page_config(
@@ -56,22 +58,26 @@ st.markdown("""
 
 
 @st.cache_resource
-def load_model_and_scaler():
-    """Load the trained model and scaler."""
+def load_pipeline():
+    """Load the trained end-to-end pipeline and its metadata.
+
+    Returns:
+        tuple: (pipeline, metadata_dict). pipeline is None if not yet trained.
+    """
     try:
-        model = joblib.load('models/best_churn_model.pkl')
-        scaler = joblib.load('models/best_churn_model_scaler.pkl')
-        feature_names = joblib.load('models/best_churn_model_features.pkl')
-        # Try to load the template if it exists
-        try:
-            template_df = joblib.load('models/best_churn_model_template.pkl')
-        except:
-            template_df = None
-        return model, scaler, feature_names, template_df
-    except Exception as e:
-        st.error(f"❌ Error loading model: {str(e)}")
+        pipeline = joblib.load('models/churn_pipeline.pkl')
+    except FileNotFoundError:
+        st.error("❌ Trained model not found.")
         st.info("Please run `python train_model.py` first to train and save the model.")
-        return None, None, None, None
+        return None, {}
+
+    metadata = {}
+    try:
+        with open('models/metadata.json') as fh:
+            metadata = json.load(fh)
+    except FileNotFoundError:
+        pass
+    return pipeline, metadata
 
 
 @st.cache_data
@@ -83,73 +89,6 @@ def load_dataset():
     except Exception as e:
         st.error(f"❌ Error loading dataset: {str(e)}")
         return None
-
-
-def prepare_prediction_data(customer_data, template_df=None, expected_columns=None):
-    """Prepare customer data for prediction using template structure.
-    
-    Args:
-        customer_data: Dictionary with customer information
-        template_df: DataFrame template with correct column structure (optional)
-        expected_columns: List of column names to align with (from training)
-    
-    Returns:
-        DataFrame with properly encoded features
-    """
-    from sklearn.preprocessing import LabelEncoder
-    
-    # If template is provided, use it to ensure proper structure
-    if template_df is not None:
-        X = pd.DataFrame([customer_data])
-        X, _ = engineer_features(X, None)
-        
-        # Get categorical columns
-        categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
-        
-        # Binary categorical features - label encode
-        binary_cols = [col for col in categorical_cols if col not in ['TenureSegment'] and X[col].nunique() == 2]
-        for col in binary_cols:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(X[col])
-        
-        # One-hot encode multi-class (WITHOUT drop_first to get all possible columns)
-        multiclass_cols = [col for col in categorical_cols if col not in binary_cols]
-        if multiclass_cols:
-            X = pd.get_dummies(X, columns=multiclass_cols, drop_first=False)
-        
-        # Add missing columns that exist in template
-        for col in expected_columns:
-            if col not in X.columns:
-                X[col] = 0
-        
-        # Select only template columns in template order
-        X = X[expected_columns]
-        
-        return X
-    
-    # Fallback: use expected_columns if template not available
-    X = pd.DataFrame([customer_data])
-    X, _ = engineer_features(X, None)
-    
-    categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
-    binary_cols = [col for col in categorical_cols if col not in ['TenureSegment'] and X[col].nunique() == 2]
-    for col in binary_cols:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col])
-    
-    multiclass_cols = [col for col in categorical_cols if col not in binary_cols]
-    if multiclass_cols:
-        X = pd.get_dummies(X, columns=multiclass_cols, drop_first=False)
-    
-    if expected_columns is not None:
-        for col in expected_columns:
-            if col not in X.columns:
-                X[col] = 0
-        # Remove extra columns
-        X = X[[col for col in X.columns if col in expected_columns]]
-        X = X[expected_columns]
-    
-    return X
 
 
 def page_overview():
@@ -324,54 +263,57 @@ def page_prediction():
     """Customer churn prediction page."""
     st.markdown("<h1 class='main-header'>🎯 Make Prediction</h1>", unsafe_allow_html=True)
     
-    model, scaler, feature_names, template_df = load_model_and_scaler()
-    if model is None or scaler is None:
+    pipeline, metadata = load_pipeline()
+    if pipeline is None:
         return
-    
+
     st.markdown("### Enter Customer Information")
-    
-    # Create input form
-    col1, col2 = st.columns(2)
-    
+
+    # Create input form (all 19 model features are collected)
+    col1, col2, col3 = st.columns(3)
+
     with col1:
         st.subheader("Demographics")
         gender = st.selectbox("Gender", ["Male", "Female"])
         senior_citizen = st.selectbox("Senior Citizen", ["No", "Yes"])
         partner = st.selectbox("Has Partner", ["Yes", "No"])
         dependents = st.selectbox("Has Dependents", ["Yes", "No"])
-    
-    with col2:
-        st.subheader("Account Information")
         tenure = st.slider("Tenure (months)", 0, 72, 12)
-        phone_service = st.selectbox("Phone Service", ["Yes", "No"])
-        paperless_billing = st.selectbox("Paperless Billing", ["Yes", "No"])
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Services")
-        internet_service = st.selectbox("Internet Service", 
-                                       ["No", "DSL", "Fiber optic"])
-        online_security = st.selectbox("Online Security", 
-                                      ["No internet service", "Yes", "No"])
-        online_backup = st.selectbox("Online Backup", 
-                                    ["No internet service", "Yes", "No"])
-    
+
     with col2:
-        st.subheader("Billing")
+        st.subheader("Services")
+        phone_service = st.selectbox("Phone Service", ["Yes", "No"])
+        multiple_lines = st.selectbox("Multiple Lines", ["No", "Yes", "No phone service"])
+        internet_service = st.selectbox("Internet Service", ["Fiber optic", "DSL", "No"])
+        online_security = st.selectbox("Online Security", ["No", "Yes", "No internet service"])
+        online_backup = st.selectbox("Online Backup", ["No", "Yes", "No internet service"])
+        device_protection = st.selectbox("Device Protection", ["No", "Yes", "No internet service"])
+
+    with col3:
+        st.subheader("More Services & Billing")
+        tech_support = st.selectbox("Tech Support", ["No", "Yes", "No internet service"])
+        streaming_tv = st.selectbox("Streaming TV", ["No", "Yes", "No internet service"])
+        streaming_movies = st.selectbox("Streaming Movies", ["No", "Yes", "No internet service"])
+        contract = st.selectbox("Contract Type", ["Month-to-month", "One year", "Two year"])
+        paperless_billing = st.selectbox("Paperless Billing", ["Yes", "No"])
+        payment_method = st.selectbox(
+            "Payment Method",
+            ["Electronic check", "Mailed check",
+             "Bank transfer (automatic)", "Credit card (automatic)"],
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
         monthly_charges = st.number_input("Monthly Charges ($)", 18.25, 118.75, 65.0, 0.25)
+    with col2:
         total_charges = st.number_input("Total Charges ($)", 0.0, 8684.8, 1500.0, 10.0)
-        contract = st.selectbox("Contract Type", 
-                               ["Month-to-month", "One year", "Two year"])
-    
+
     st.markdown("---")
-    
+
     # Make prediction
     if st.button("🔮 Predict Churn", use_container_width=True, key="predict_btn"):
-        
-        # Prepare customer data
+
+        # Build the customer record with the exact raw schema the pipeline expects
         customer_data = {
             'gender': gender,
             'SeniorCitizen': 1 if senior_citizen == 'Yes' else 0,
@@ -379,37 +321,26 @@ def page_prediction():
             'Dependents': dependents,
             'tenure': tenure,
             'PhoneService': phone_service,
+            'MultipleLines': multiple_lines,
             'InternetService': internet_service,
             'OnlineSecurity': online_security,
             'OnlineBackup': online_backup,
+            'DeviceProtection': device_protection,
+            'TechSupport': tech_support,
+            'StreamingTV': streaming_tv,
+            'StreamingMovies': streaming_movies,
+            'Contract': contract,
             'PaperlessBilling': paperless_billing,
+            'PaymentMethod': payment_method,
             'MonthlyCharges': monthly_charges,
             'TotalCharges': total_charges,
-            'Contract': contract,
         }
-        
+
         try:
-            # Load model and template
-            model, scaler, feature_names, template_df = load_model_and_scaler()
-            if model is None:
-                return
-            
-            # Prepare data for model with template
-            X = prepare_prediction_data(customer_data, template_df=template_df, expected_columns=feature_names)
-            
-            # Scale ONLY the numeric features that the scaler expects
-            scaler_features = list(scaler.feature_names_in_)
-            X_numeric = X[scaler_features].copy()
-            X_scaled_numeric = pd.DataFrame(scaler.transform(X_numeric), columns=scaler_features)
-            
-            # Create a copy of X for the final scaled data
-            X_scaled = X.copy()
-            X_scaled[scaler_features] = X_scaled_numeric
-            
-            # Make prediction
-            prediction = model.predict(X_scaled)[0]
-            probability = model.predict_proba(X_scaled)[0]
-            
+            # One call: the fitted pipeline does FE + encoding + scaling + predict.
+            probability = pipeline.predict_proba(pd.DataFrame([customer_data]))[0]
+            prediction = int(probability[1] >= 0.5)
+
             # Display results
             st.markdown("---")
             st.markdown("### 📊 Prediction Result")
@@ -477,16 +408,33 @@ def page_prediction():
                 - Encourage loyalty programs
                 """)
         
-        except Exception as e:
-            st.error(f"❌ Error making prediction: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
+        except Exception:
+            st.error("❌ Unable to generate a prediction for these inputs. "
+                     "Please review the values and try again.")
+            logging.exception("Prediction failed")
 
 
 def page_model_details():
     """Model performance details page."""
     st.markdown("<h1 class='main-header'>📋 Model Details</h1>", unsafe_allow_html=True)
-    
+
+    # Live metrics from the deployed model's metadata
+    _, metadata = load_pipeline()
+    if metadata:
+        st.markdown(f"### Deployed Model: `{metadata.get('model', 'n/a')}`")
+        tm = metadata.get('test_metrics', {})
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("ROC-AUC", f"{tm.get('roc_auc', float('nan')):.3f}")
+        c2.metric("F1-Score", f"{tm.get('f1', float('nan')):.3f}")
+        c3.metric("Recall", f"{tm.get('recall', float('nan')):.3f}")
+        c4.metric("Precision", f"{tm.get('precision', float('nan')):.3f}")
+        st.caption(
+            f"Trained: {metadata.get('trained_at', 'n/a')} · "
+            f"scikit-learn {metadata.get('sklearn_version', 'n/a')} · "
+            f"{metadata.get('n_train', 0):,} train / {metadata.get('n_test', 0):,} test samples"
+        )
+        st.markdown("---")
+
     # Load comparison data
     comparison_file = 'reports/model_comparison.csv'
     if os.path.exists(comparison_file):
