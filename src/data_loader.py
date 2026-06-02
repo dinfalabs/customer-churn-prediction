@@ -9,89 +9,62 @@ This module handles:
 """
 
 import pandas as pd
-import numpy as np
 import os
-from pathlib import Path
-import warnings
 
-warnings.filterwarnings('ignore')
+DEFAULT_DATASET_PATH = 'data/WA_Fn-UseC_-_Telco_Customer_Churn.csv'
+KAGGLE_URL = 'https://www.kaggle.com/blastchar/telco-customer-churn'
 
 
-def load_telco_data(data_path: str = 'data/WA_Fn-UseC_-_Telco_Customer_Churn.csv') -> pd.DataFrame:
+def load_telco_data(data_path: str = DEFAULT_DATASET_PATH) -> pd.DataFrame:
     """
-    Load the Telco Customer Churn dataset.
-    
-    If the file doesn't exist, it will be downloaded from a public source.
-    
+    Load the Telco Customer Churn dataset from disk.
+
+    The dataset is a required input: this function never fabricates data. If the
+    file is missing or looks synthetic, it fails loudly so the problem surfaces
+    instead of silently poisoning training with random noise.
+
     Args:
         data_path (str): Path to the CSV file
-        
+
     Returns:
         pd.DataFrame: Loaded dataset
-        
+
     Raises:
-        FileNotFoundError: If the file cannot be found or downloaded
+        FileNotFoundError: If the dataset is not present on disk
+        ValueError: If the dataset fails the authenticity guardrail
     """
-    if os.path.exists(data_path):
-        print(f"✓ Loading dataset from {data_path}")
-        df = pd.read_csv(data_path)
-        return df
-    else:
-        print(f"Dataset not found at {data_path}")
-        print("Attempting to download from public source...")
-        
-        # Alternative: Create a sample dataset that matches Telco structure
-        df = _create_sample_telco_data()
-        
-        # Create data directory if it doesn't exist
-        os.makedirs(os.path.dirname(data_path) if os.path.dirname(data_path) else '.', exist_ok=True)
-        
-        # Save the dataset
-        df.to_csv(data_path, index=False)
-        print(f"✓ Sample dataset saved to {data_path}")
-        
-        return df
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(
+            f"Dataset not found at '{data_path}'. Download the real Telco Customer "
+            f"Churn dataset from {KAGGLE_URL} and place it there. "
+            "This project does NOT generate synthetic data."
+        )
 
-
-def _create_sample_telco_data() -> pd.DataFrame:
-    """
-    Create a sample Telco Customer Churn dataset with realistic structure and data.
-    
-    This is used when the original dataset is not available. In production,
-    you should download from: https://www.kaggle.com/blastchar/telco-customer-churn
-    
-    Returns:
-        pd.DataFrame: Sample Telco dataset
-    """
-    np.random.seed(42)
-    n_samples = 7043
-    
-    data = {
-        'customerID': [f'ID-{i:05d}' for i in range(n_samples)],
-        'gender': np.random.choice(['Male', 'Female'], n_samples),
-        'SeniorCitizen': np.random.choice([0, 1], n_samples, p=[0.84, 0.16]),
-        'Partner': np.random.choice(['Yes', 'No'], n_samples),
-        'Dependents': np.random.choice(['Yes', 'No'], n_samples),
-        'tenure': np.random.randint(0, 72, n_samples),
-        'PhoneService': np.random.choice(['Yes', 'No'], n_samples),
-        'MultipleLines': np.random.choice(['Yes', 'No', 'No phone service'], n_samples),
-        'InternetService': np.random.choice(['Fiber optic', 'DSL', 'No'], n_samples),
-        'OnlineSecurity': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'OnlineBackup': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'DeviceProtection': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'TechSupport': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'StreamingTV': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'StreamingMovies': np.random.choice(['Yes', 'No', 'No internet service'], n_samples),
-        'Contract': np.random.choice(['Month-to-month', 'One year', 'Two year'], n_samples, p=[0.44, 0.25, 0.31]),
-        'PaperlessBilling': np.random.choice(['Yes', 'No'], n_samples),
-        'PaymentMethod': np.random.choice(['Electronic check', 'Mailed check', 'Bank transfer', 'Credit card'], n_samples),
-        'MonthlyCharges': np.random.uniform(18.25, 118.75, n_samples).round(2),
-        'TotalCharges': np.random.uniform(18.25, 8684.8, n_samples).round(2),
-        'Churn': np.random.choice(['Yes', 'No'], n_samples, p=[0.265, 0.735]),
-    }
-    
-    df = pd.DataFrame(data)
+    print(f"✓ Loading dataset from {data_path}")
+    df = pd.read_csv(data_path)
+    _assert_is_real_telco(df)
     return df
+
+
+def _assert_is_real_telco(df: pd.DataFrame) -> None:
+    """Guardrail blocking placeholder/synthetic datasets from entering the pipeline.
+
+    Catches the failure mode where a random sample (target independent of every
+    feature) is mistaken for the real dataset, which makes any model degenerate
+    to the majority-class baseline.
+    """
+    if 'customerID' in df.columns and df['customerID'].astype(str).str.startswith('ID-').mean() > 0.5:
+        raise ValueError(
+            "Dataset looks synthetic: customerIDs use the 'ID-xxxxx' placeholder "
+            "format, not the real Telco format (e.g. '7590-VHVEG')."
+        )
+    if {'Contract', 'Churn'} <= set(df.columns):
+        rates = df.groupby('Contract')['Churn'].apply(lambda s: (s == 'Yes').mean())
+        if len(rates) > 1 and (rates.max() - rates.min()) < 0.10:
+            raise ValueError(
+                "No churn signal across Contract types (spread < 0.10): the data "
+                "is almost certainly synthetic/shuffled, not the real Telco set."
+            )
 
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -111,33 +84,32 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
         pd.DataFrame: Cleaned dataset
     """
     df = df.copy()
-    
+
     # Remove duplicates
     initial_rows = len(df)
     df = df.drop_duplicates()
     print(f"✓ Removed {initial_rows - len(df)} duplicate rows")
-    
-    # Handle missing values in TotalCharges (convert empty strings to NaN)
+
+    # Strip surrounding whitespace from categorical values (avoids 'Yes' vs 'Yes ').
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = df[col].str.strip()
+
+    # TotalCharges ships as text with blank cells -> coerce to numeric, leaving
+    # NaN. Missing-value imputation is delegated to the modeling pipeline so that
+    # training and serving share exactly one imputation strategy (no skew, and
+    # no pandas-3.0 chained-inplace pitfalls).
     if 'TotalCharges' in df.columns:
         df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
-        missing_total_charges = df['TotalCharges'].isna().sum()
-        if missing_total_charges > 0:
-            # Fill with monthly charges if tenure is 0, else calculate average
-            df.loc[df['TotalCharges'].isna() & (df['tenure'] == 0), 'TotalCharges'] = 0
-            df['TotalCharges'].fillna(df['TotalCharges'].mean(), inplace=True)
-            print(f"✓ Handled {missing_total_charges} missing TotalCharges values")
-    
-    # Standardize categorical values
-    categorical_cols = df.select_dtypes(include=['object']).columns
-    for col in categorical_cols:
-        df[col] = df[col].str.strip()
-    
+        n_missing = int(df['TotalCharges'].isna().sum())
+        if n_missing:
+            print(f"✓ Found {n_missing} blank TotalCharges (imputed in the pipeline)")
+
     # Remove customer ID as it's not useful for prediction
     if 'customerID' in df.columns:
-        df = df.drop('customerID', axis=1)
-    
+        df = df.drop(columns='customerID')
+
     print(f"✓ Data cleaning completed. Final shape: {df.shape}")
-    
+
     return df
 
 

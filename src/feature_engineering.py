@@ -11,11 +11,8 @@ This module handles:
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-import warnings
 
-warnings.filterwarnings('ignore')
+from .pipeline import add_engineered_features
 
 
 def separate_features_and_target(df: pd.DataFrame, target_col: str = 'Churn') -> tuple:
@@ -109,42 +106,15 @@ def engineer_features(X: pd.DataFrame, X_test: pd.DataFrame = None) -> tuple:
         
     Returns:
         tuple: (X_engineered, X_test_engineered)
+
+    Note:
+        The actual logic lives in :func:`src.pipeline.add_engineered_features`,
+        the single source of truth shared with the serving pipeline. This wrapper
+        only preserves the legacy ``(X, X_test)`` signature for backward compat.
     """
-    X = X.copy()
+    X = add_engineered_features(X)
     if X_test is not None:
-        X_test = X_test.copy()
-    
-    # 1. Count total services
-    service_cols = [col for col in X.columns if 'Online' in col or 'Streaming' in col or 'Device' in col or 'Tech' in col]
-    if service_cols:
-        X['TotalServices'] = (X[service_cols] == 'Yes').sum(axis=1)
-        if X_test is not None:
-            X_test['TotalServices'] = (X_test[service_cols] == 'Yes').sum(axis=1)
-    
-    # 2. Contract risk feature
-    if 'Contract' in X.columns:
-        contract_risk = {'Month-to-month': 3, 'One year': 2, 'Two year': 1}
-        X['ContractRisk'] = X['Contract'].map(contract_risk).fillna(2)
-        if X_test is not None:
-            X_test['ContractRisk'] = X_test['Contract'].map(contract_risk).fillna(2)
-    
-    # 3. Monthly to total charges ratio
-    if 'MonthlyCharges' in X.columns and 'TotalCharges' in X.columns:
-        X['ChargeRatio'] = X['MonthlyCharges'] / (X['TotalCharges'] + 1)  # +1 to avoid division by zero
-        if X_test is not None:
-            X_test['ChargeRatio'] = X_test['MonthlyCharges'] / (X_test['TotalCharges'] + 1)
-    
-    # 4. Tenure segments
-    if 'tenure' in X.columns:
-        X['TenureSegment'] = pd.cut(X['tenure'], bins=[0, 12, 24, 36, 72], 
-                                     labels=['0-1 year', '1-2 years', '2-3 years', '3+ years'])
-        X['TenureSegment'] = X['TenureSegment'].astype(str)
-        
-        if X_test is not None:
-            X_test['TenureSegment'] = pd.cut(X_test['tenure'], bins=[0, 12, 24, 36, 72], 
-                                              labels=['0-1 year', '1-2 years', '2-3 years', '3+ years'])
-            X_test['TenureSegment'] = X_test['TenureSegment'].astype(str)
-    
+        X_test = add_engineered_features(X_test)
     return X, X_test
 
 
