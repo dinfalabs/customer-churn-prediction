@@ -1,5 +1,4 @@
 """API tests for the FastAPI scoring service (via Starlette TestClient)."""
-import pytest
 from fastapi.testclient import TestClient
 
 from service.main import app

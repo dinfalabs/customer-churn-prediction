@@ -9,14 +9,12 @@ Run this app with:
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import io
 import joblib
 import json
 import logging
 import os
 import sys
-import plotly.express as px
 import plotly.graph_objects as go
 
 # Add project root to path
@@ -175,7 +173,7 @@ def page_churn_insights():
             height=400,
             showlegend=True
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     
     with col2:
         churn_pct = (df['Churn'].value_counts() / len(df) * 100).round(2)
@@ -184,7 +182,7 @@ def page_churn_insights():
             'Count': [churn_counts['No'], churn_counts['Yes']],
             'Percentage': [f"{churn_pct['No']:.1f}%", f"{churn_pct['Yes']:.1f}%"]
         }
-        st.dataframe(pd.DataFrame(metrics_data), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(metrics_data), hide_index=True, width="stretch")
     
     st.markdown("---")
     
@@ -213,7 +211,7 @@ def page_churn_insights():
                 yaxis_title="Churn Rate (%)",
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
     
     with col2:
         if 'InternetService' in df.columns:
@@ -235,7 +233,7 @@ def page_churn_insights():
                 yaxis_title="Churn Rate (%)",
                 height=400
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
     
     st.markdown("---")
     
@@ -259,7 +257,7 @@ def page_churn_insights():
         barmode='overlay',
         height=400
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def page_prediction():
@@ -314,7 +312,7 @@ def page_prediction():
     st.markdown("---")
 
     # Make prediction
-    if st.button("🔮 Predict Churn", use_container_width=True, key="predict_btn"):
+    if st.button("🔮 Predict Churn", width="stretch", key="predict_btn"):
 
         # Build the customer record with the exact raw schema the pipeline expects
         customer_data = {
@@ -389,7 +387,7 @@ def page_prediction():
                 height=300,
                 showlegend=False
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             
             # Recommendations
             st.markdown("### 💡 Recommendations")
@@ -427,7 +425,7 @@ def page_prediction():
                     xaxis_title="Contribution to churn log-odds",
                     height=380, margin=dict(l=10, r=10, t=40, b=10),
                 )
-                st.plotly_chart(exp_fig, use_container_width=True)
+                st.plotly_chart(exp_fig, width="stretch")
                 st.caption("Exact contributions from the linear model (linear SHAP values): "
                            "with the intercept they sum to the predicted churn log-odds.")
 
@@ -464,7 +462,7 @@ def page_model_details():
         comparison_df = pd.read_csv(comparison_file)
         
         st.markdown("### Model Performance Comparison")
-        st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+        st.dataframe(comparison_df, hide_index=True, width="stretch")
     
     # Load feature importance
     importance_file = 'reports/feature_importance.csv'
@@ -489,7 +487,7 @@ def page_model_details():
             height=500,
             yaxis={'categoryorder': 'total ascending'}
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         
         st.markdown("**Interpretation:**")
         top_features = importance_df.head(3)['Feature'].tolist()
@@ -524,12 +522,12 @@ def page_data_overview():
     st.markdown("---")
     
     st.markdown("### Dataset Preview")
-    st.dataframe(df.head(10), use_container_width=True)
+    st.dataframe(df.head(10), width="stretch")
     
     st.markdown("---")
     
     st.markdown("### Numerical Features Summary")
-    st.dataframe(df.describe(), use_container_width=True)
+    st.dataframe(df.describe(), width="stretch")
     
     st.markdown("---")
     
@@ -539,7 +537,7 @@ def page_data_overview():
     for col in categorical_cols:
         st.markdown(f"**{col}**")
         value_counts = df[col].value_counts()
-        st.dataframe(value_counts, use_container_width=True)
+        st.dataframe(value_counts, width="stretch")
 
 
 def page_train_your_own():
@@ -566,7 +564,7 @@ def page_train_your_own():
         return
 
     st.markdown(f"**Loaded:** {df.shape[0]:,} rows × {df.shape[1]} columns")
-    st.dataframe(df.head(8), use_container_width=True)
+    st.dataframe(df.head(8), width="stretch")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -576,7 +574,7 @@ def page_train_your_own():
         exclude = st.multiselect("Columns to ignore (optional)",
                                  options=[c for c in df.columns if c != target])
 
-    if st.button("🚀 Train models", use_container_width=True, type="primary"):
+    if st.button("🚀 Train models", width="stretch", type="primary"):
         with st.spinner("Training and evaluating models…"):
             try:
                 st.session_state["byod"] = train_on_dataframe(df, target, exclude=exclude)
@@ -604,7 +602,7 @@ def page_train_your_own():
         rows.append({"Model": name, "CV ROC-AUC": round(r["cv_roc_auc"], 3),
                      "Test ROC-AUC": round(m["roc_auc"], 3), "Recall": round(m["recall"], 3),
                      "Precision": round(m["precision"], 3), "F1": round(m["f1"], 3)})
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     if result.dropped:
         st.caption("Ignored columns: " + ", ".join(f"`{c}` ({why})" for c, why in result.dropped))
 
@@ -617,7 +615,7 @@ def page_train_your_own():
             z=cm, x=["Pred: No", "Pred: Yes"], y=["Actual: No", "Actual: Yes"],
             colorscale="Blues", showscale=False, text=cm, texttemplate="%{text}"))
         fig.update_layout(height=360, yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     with c2:
         st.markdown("### Feature importance")
         imp = best.get("importance")
@@ -626,7 +624,7 @@ def page_train_your_own():
             fig = go.Figure(go.Bar(x=top["importance"], y=top["feature"],
                                    orientation="h", marker=dict(color="#3498db")))
             fig.update_layout(height=360, xaxis_title="Permutation importance")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     st.markdown("---")
     st.markdown("### 🎯 Predict a single record")
