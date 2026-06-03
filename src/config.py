@@ -38,10 +38,9 @@ RANDOM_STATE = 42
 # MODEL CONFIGURATION
 # ============================================================================
 
-# Model file paths
-MODEL_PATH = MODELS_DIR / 'best_churn_model.pkl'
-SCALER_PATH = MODELS_DIR / 'best_churn_model_scaler.pkl'
-FEATURE_NAMES_PATH = MODELS_DIR / 'best_churn_model_features.pkl'
+# Model artifact paths (single serialized pipeline + metadata)
+PIPELINE_PATH = MODELS_DIR / 'churn_pipeline.pkl'
+METADATA_PATH = MODELS_DIR / 'metadata.json'
 
 # Logistic Regression hyperparameters
 LR_PARAMS = {

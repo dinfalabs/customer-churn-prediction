@@ -23,9 +23,8 @@ Found a bug or have a suggestion? Please create an issue with:
 ### 2. Fork and Clone
 
 ```bash
-git clone https://github.com/yourusername/customer-churn-prediction.git
+git clone https://github.com/dinfalabs/customer-churn-prediction.git
 cd customer-churn-prediction
-git remote add upstream https://github.com/original-owner/customer-churn-prediction.git
 ```
 
 ### 3. Create a Feature Branch
@@ -318,9 +317,7 @@ Contributors will be:
 ## Questions?
 
 Feel free to reach out:
-- GitHub Issues
-- Email: contact@example.com
-- Discord: [Join our server]
+- GitHub Issues: https://github.com/dinfalabs/customer-churn-prediction/issues
 
 ---
 

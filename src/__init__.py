@@ -1,26 +1,27 @@
 """
 Customer Churn Prediction - src package
 
-This package contains all the modules needed for the customer churn prediction project:
-- data_loader: Data loading and preprocessing
-- feature_engineering: Feature creation and transformation
-- model_utils: Model training and evaluation
-- config: Configuration settings
-- utils: Utility functions
+Modules:
+- data_loader: dataset loading, cleaning and validation
+- feature_engineering: target separation and derived features
+- pipeline: the single fit-once / serve-once modeling pipeline
+- config: configuration settings
 """
 
 from .data_loader import load_telco_data, clean_data, validate_data, get_dataset_info
-from .feature_engineering import (separate_features_and_target, encode_categorical_features, 
-                                 engineer_features, scale_features, get_feature_importance_dataframe)
-from .model_utils import (train_logistic_regression, train_random_forest, evaluate_model, 
-                         compare_models, select_best_model, save_model, load_model, 
-                         cross_validate_model, ModelEvaluator)
+from .feature_engineering import separate_features_and_target, engineer_features
+from .pipeline import (
+    build_pipeline,
+    add_engineered_features,
+    FeatureEngineer,
+    NUMERIC_FEATURES,
+    CATEGORICAL_FEATURES,
+)
 from . import config
-from . import utils
 
-__version__ = "1.0.0"
-__author__ = "Data Science Team"
-__description__ = "Customer Churn Prediction - A comprehensive ML project"
+__version__ = "2.0.0"
+__author__ = "Davide Infantino"
+__description__ = "Customer Churn Prediction - end-to-end ML pipeline + Streamlit app"
 
 __all__ = [
     # Data loading
@@ -30,21 +31,13 @@ __all__ = [
     'get_dataset_info',
     # Feature engineering
     'separate_features_and_target',
-    'encode_categorical_features',
     'engineer_features',
-    'scale_features',
-    'get_feature_importance_dataframe',
-    # Model training and evaluation
-    'train_logistic_regression',
-    'train_random_forest',
-    'evaluate_model',
-    'compare_models',
-    'select_best_model',
-    'save_model',
-    'load_model',
-    'cross_validate_model',
-    'ModelEvaluator',
+    # Pipeline
+    'build_pipeline',
+    'add_engineered_features',
+    'FeatureEngineer',
+    'NUMERIC_FEATURES',
+    'CATEGORICAL_FEATURES',
     # Modules
     'config',
-    'utils',
 ]
