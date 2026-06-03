@@ -5,7 +5,7 @@ End-to-end machine-learning project that predicts telecom customer churn and ser
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.8-orange.svg)
 [![CI](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-16%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-21%20passing-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=dinfalabs/customer-churn-prediction&branch=main&mainModule=app.py)
 
@@ -54,7 +54,7 @@ Telecom companies lose significant revenue to churn. Identifying at-risk custome
 - **Data**: loading, validation (with a guardrail against synthetic data), cleaning
 - **Modeling**: a single scikit-learn `Pipeline` (feature engineering + preprocessing + classifier) fitted once and reused for inference — no train/serve skew
 - **Selection**: cross-validation on the training split only (the test set is touched once)
-- **App**: a Streamlit UI for exploring churn patterns and scoring individual customers
+- **App**: a Streamlit UI with two modes — explore the Telco demo, or **upload your own dataset** to train a fresh model in-browser
 
 ---
 
@@ -160,7 +160,9 @@ Loads and cleans the data, selects the best model by 5-fold CV ROC-AUC, evaluate
 streamlit run app.py
 ```
 
-Opens at `http://localhost:8501` with five pages: Overview, Churn Insights, Make Prediction, Model Details, Data Overview.
+The sidebar offers two modes:
+- **🎯 Demo (Telco)** — five pages on the bundled model: Overview, Churn Insights, Make Prediction, Model Details, Data Overview.
+- **📤 Your own data** — upload any CSV with a binary target; the app auto-detects feature types, applies guardrails, trains and compares models, then lets you predict and **download the trained pipeline**. No project-specific assumptions — it works on any churn-style dataset.
 
 ### 3. Score a customer in Python
 
@@ -290,11 +292,13 @@ Beyond global drivers, every individual prediction comes with a **per-customer e
 pytest -q
 ```
 
-14 tests covering:
+21 tests covering:
 - **Feature engineering** — `TotalServices`, `ContractRisk` mappings
 - **Train/serve guard** — a high-risk profile must score clearly higher than a low-risk one (catches the input-dropping skew bug)
 - **Performance gate** — reads `metadata.json` and fails if ROC-AUC < 0.78 or recall < 0.45 (catches a model that degenerates to the majority class)
 - **API** — health, prediction shape, high-vs-low ordering, Pydantic validation (`422`), batch scoring
+- **Explanations** — per-customer contributions reconstruct the predicted probability
+- **AutoML / bring-your-own-data** — trains on a synthetic dataset, drops ID-like columns, enforces guardrails (min rows, binary target)
 
 Continuous integration (`.github/workflows/ci.yml`) installs dependencies and runs the suite on every push and pull request.
 
@@ -310,6 +314,7 @@ Continuous integration (`.github/workflows/ci.yml`) installs dependencies and ru
 - ✅ FastAPI scoring service (`/predict`, `/predict/batch`) + Docker
 - ✅ CI (GitHub Actions: pytest)
 - ✅ Per-customer explanations (linear SHAP values)
+- ✅ "Bring your own data" mode — train on any uploaded CSV (auto feature detection)
 
 **Next**
 - [ ] More algorithms (XGBoost / LightGBM) + hyperparameter search
