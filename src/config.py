@@ -4,7 +4,6 @@ Configuration settings for the Customer Churn Prediction project.
 This module contains all configurable parameters used throughout the project.
 """
 
-import os
 from pathlib import Path
 
 # ============================================================================
