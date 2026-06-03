@@ -10,6 +10,7 @@ Run this app with:
 import streamlit as st
 import pandas as pd
 import numpy as np
+import io
 import joblib
 import json
 import logging
@@ -24,6 +25,7 @@ from src.data_loader import load_telco_data
 # FeatureEngineer must be importable so joblib can reconstruct the saved pipeline.
 from src.pipeline import FeatureEngineer  # noqa: F401
 from src.explain import explain_customer, supports_explanation
+from src.automl import train_on_dataframe, DataValidationError
 
 # Configuration
 st.set_page_config(
@@ -540,27 +542,146 @@ def page_data_overview():
         st.dataframe(value_counts, use_container_width=True)
 
 
+def page_train_your_own():
+    """Bring-your-own-data training page (AutoML-lite)."""
+    st.markdown("<h1 class='main-header'>📤 Train on Your Own Data</h1>", unsafe_allow_html=True)
+    st.markdown("""
+    Upload **any churn dataset** (CSV) with a **binary target** column. The app
+    auto-detects feature types, trains and compares two models, then lets you
+    predict and download the trained model. The data stays in this session.
+    """)
+
+    uploaded = st.file_uploader("Upload a CSV file", type=["csv"])
+    if uploaded is None:
+        st.info("👆 Upload a CSV to begin — or switch to **Demo (Telco)** in the sidebar.")
+        return
+
+    try:
+        df = pd.read_csv(uploaded)
+    except Exception:
+        st.error("Could not read this file as CSV. Please check the format.")
+        return
+    if df.shape[1] < 2:
+        st.error("The dataset needs at least 2 columns (features + a target).")
+        return
+
+    st.markdown(f"**Loaded:** {df.shape[0]:,} rows × {df.shape[1]} columns")
+    st.dataframe(df.head(8), use_container_width=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        target = st.selectbox("🎯 Target column (what to predict)",
+                              options=list(df.columns), index=len(df.columns) - 1)
+    with col2:
+        exclude = st.multiselect("Columns to ignore (optional)",
+                                 options=[c for c in df.columns if c != target])
+
+    if st.button("🚀 Train models", use_container_width=True, type="primary"):
+        with st.spinner("Training and evaluating models…"):
+            try:
+                st.session_state["byod"] = train_on_dataframe(df, target, exclude=exclude)
+            except DataValidationError as exc:
+                st.session_state.pop("byod", None)
+                st.error(f"❌ {exc}")
+                return
+            except Exception:
+                st.session_state.pop("byod", None)
+                st.error("❌ Training failed unexpectedly. Try a cleaner dataset.")
+                logging.exception("BYOD training failed")
+                return
+
+    result = st.session_state.get("byod")
+    if result is None:
+        return
+
+    st.success(f"✅ Trained. Best model: **{result.best_model}** "
+               f"(positive class = `{result.positive_label}`).")
+
+    st.markdown("### Model comparison")
+    rows = []
+    for name, r in result.results.items():
+        m = r["metrics"]
+        rows.append({"Model": name, "CV ROC-AUC": round(r["cv_roc_auc"], 3),
+                     "Test ROC-AUC": round(m["roc_auc"], 3), "Recall": round(m["recall"], 3),
+                     "Precision": round(m["precision"], 3), "F1": round(m["f1"], 3)})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    if result.dropped:
+        st.caption("Ignored columns: " + ", ".join(f"`{c}` ({why})" for c, why in result.dropped))
+
+    best = result.results[result.best_model]
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### Confusion matrix")
+        cm = best["confusion_matrix"]
+        fig = go.Figure(data=go.Heatmap(
+            z=cm, x=["Pred: No", "Pred: Yes"], y=["Actual: No", "Actual: Yes"],
+            colorscale="Blues", showscale=False, text=cm, texttemplate="%{text}"))
+        fig.update_layout(height=360, yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        st.markdown("### Feature importance")
+        imp = best.get("importance")
+        if imp is not None and len(imp):
+            top = imp.head(12).iloc[::-1]
+            fig = go.Figure(go.Bar(x=top["importance"], y=top["feature"],
+                                   orientation="h", marker=dict(color="#3498db")))
+            fig.update_layout(height=360, xaxis_title="Permutation importance")
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🎯 Predict a single record")
+    inputs = {}
+    cols = st.columns(3)
+    for i, (col, meta) in enumerate(result.schema.items()):
+        with cols[i % 3]:
+            if meta["type"] == "numeric":
+                inputs[col] = st.number_input(col, value=float(meta["median"]), key=f"byod_in_{col}")
+            else:
+                inputs[col] = st.selectbox(col, meta["choices"], key=f"byod_in_{col}")
+    if st.button("Predict", key="byod_predict"):
+        try:
+            proba = float(result.best_pipeline.predict_proba(pd.DataFrame([inputs]))[0, 1])
+            st.metric(f"Probability of `{result.positive_label}`", f"{proba:.1%}")
+            st.progress(min(max(proba, 0.0), 1.0))
+        except Exception:
+            st.error("Could not score this record with the given inputs.")
+            logging.exception("BYOD predict failed")
+
+    st.markdown("---")
+    buffer = io.BytesIO()
+    joblib.dump(result.best_pipeline, buffer)
+    st.download_button("⬇️ Download trained model (.pkl)", data=buffer.getvalue(),
+                       file_name="churn_model.pkl", mime="application/octet-stream")
+    st.caption("Reload later with `joblib.load(...)` and call `.predict_proba(your_dataframe)`.")
+
+
 # Sidebar navigation
 def main():
     """Main app function."""
     st.sidebar.markdown("<h1 style='text-align: center'>Navigation</h1>", unsafe_allow_html=True)
-    
-    page = st.sidebar.radio(
-        "Select a page:",
-        ["🏠 Overview", "📈 Churn Insights", "🎯 Make Prediction", 
-         "📋 Model Details", "📊 Data Overview"]
-    )
-    
-    if page == "🏠 Overview":
-        page_overview()
-    elif page == "📈 Churn Insights":
-        page_churn_insights()
-    elif page == "🎯 Make Prediction":
-        page_prediction()
-    elif page == "📋 Model Details":
-        page_model_details()
-    elif page == "📊 Data Overview":
-        page_data_overview()
+
+    mode = st.sidebar.radio("Mode", ["🎯 Demo (Telco)", "📤 Your own data"], key="app_mode")
+    st.sidebar.markdown("---")
+
+    if mode == "📤 Your own data":
+        page_train_your_own()
+    else:
+        page = st.sidebar.radio(
+            "Select a page:",
+            ["🏠 Overview", "📈 Churn Insights", "🎯 Make Prediction",
+             "📋 Model Details", "📊 Data Overview"]
+        )
+
+        if page == "🏠 Overview":
+            page_overview()
+        elif page == "📈 Churn Insights":
+            page_churn_insights()
+        elif page == "🎯 Make Prediction":
+            page_prediction()
+        elif page == "📋 Model Details":
+            page_model_details()
+        elif page == "📊 Data Overview":
+            page_data_overview()
     
     # Sidebar info
     st.sidebar.markdown("---")
