@@ -9,5 +9,10 @@ plotly==6.7.0
 streamlit==1.57.0
 joblib==1.5.3
 
+# API service
+fastapi==0.136.3
+uvicorn==0.48.0
+
 # Dev / test
 pytest==9.0.3
+httpx==0.28.1
