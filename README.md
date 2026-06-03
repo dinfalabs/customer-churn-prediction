@@ -4,7 +4,8 @@ End-to-end machine-learning project that predicts telecom customer churn and ser
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.8-orange.svg)
-![Tests](https://img.shields.io/badge/tests-14%20passing-brightgreen.svg)
+[![CI](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml)
+![Tests](https://img.shields.io/badge/tests-16%20passing-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=dinfalabs/customer-churn-prediction&branch=main&mainModule=app.py)
 
