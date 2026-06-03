@@ -26,8 +26,8 @@ This will:
 ================================================================================
 CUSTOMER CHURN PREDICTION - MODEL TRAINING PIPELINE
 ================================================================================
-[1/8] Loading dataset...
-[2/8] Cleaning data...
+[1/6] Loading and cleaning dataset...
+[3/6] Selecting model via 5-fold CV (ROC-AUC) on train...
 ...
 ✓ TRAINING COMPLETED SUCCESSFULLY
 ================================================================================
@@ -43,30 +43,30 @@ The app will open at `http://localhost:8501`
 ## 📊 Project Structure
 
 ```
-customer_project/
-├── app.py                    # Main Streamlit application
+customer-churn-prediction/
+├── app.py                    # Streamlit application
 ├── train_model.py            # Model training script
 ├── README.md                 # Full documentation
 ├── requirements.txt          # Python dependencies
 │
-├── data/                     # Datasets
+├── data/                     # Dataset
 │   └── WA_Fn-UseC_-_Telco_Customer_Churn.csv
 │
-├── notebooks/               # Jupyter notebooks
-│   ├── 01_EDA.ipynb        # Exploratory data analysis
-│   └── 02_Model_Training.ipynb # Model training
+├── notebooks/                # Jupyter notebooks
+│   ├── 01_EDA.ipynb          # Exploratory data analysis
+│   └── 02_Model_Training.ipynb  # Model training (uses the pipeline)
 │
-├── src/                     # Source code
-│   ├── data_loader.py       # Data loading & preprocessing
-│   ├── feature_engineering.py # Feature engineering
-│   ├── model_utils.py       # Model training & evaluation
-│   ├── config.py            # Configuration settings
-│   └── utils.py             # Utility functions
+├── src/                      # Source code
+│   ├── data_loader.py        # Data loading, cleaning, validation
+│   ├── feature_engineering.py # Target separation + derived features
+│   ├── pipeline.py           # The single fit-once / serve-once pipeline
+│   └── config.py             # Configuration settings
 │
-└── models/                  # Trained models
-    ├── best_churn_model.pkl
-    ├── best_churn_model_scaler.pkl
-    └── best_churn_model_features.pkl
+├── models/                   # Trained artifacts
+│   ├── churn_pipeline.pkl    # Serialized end-to-end pipeline
+│   └── metadata.json         # Model name, metrics, sklearn version
+│
+└── reports/                  # Generated CSV reports
 ```
 
 ## 🎯 Using the Web Application
@@ -153,14 +153,14 @@ The easiest way is through the web app:
 ## 🛠️ Customization
 
 ### Modify Model Parameters
-Edit `src/config.py`:
+Edit the `CANDIDATES` dict in `train_model.py`:
 ```python
-RF_PARAMS = {
-    'n_estimators': 100,  # Increase for better accuracy
-    'max_depth': 15,      # Reduce to prevent overfitting
-    'min_samples_split': 10,
-    'min_samples_leaf': 4,
-}
+"Random Forest": RandomForestClassifier(
+    n_estimators=300,   # more trees
+    max_depth=12,       # reduce to limit overfitting
+    min_samples_leaf=4,
+    class_weight="balanced_subsample",
+),
 ```
 
 ### Add Custom Features
@@ -200,7 +200,7 @@ streamlit run app.py --server.port 8502
 # Add caching in app.py
 @st.cache_resource
 def load_model():
-    return joblib.load('models/best_churn_model.pkl')
+    return joblib.load('models/churn_pipeline.pkl')
 ```
 
 ## 📚 Next Steps
@@ -225,7 +225,7 @@ def load_model():
 
 ## 🔗 Useful Links
 
-- **GitHub**: https://github.com/yourusername/customer-churn-prediction
+- **GitHub**: https://github.com/dinfalabs/customer-churn-prediction
 - **Kaggle Dataset**: https://www.kaggle.com/blastchar/telco-customer-churn
 - **Scikit-learn Docs**: https://scikit-learn.org/
 - **Streamlit Docs**: https://docs.streamlit.io/
@@ -253,8 +253,8 @@ After setup, verify everything works:
 ### Understanding the Code
 1. Start with `src/data_loader.py` - see how data is loaded
 2. Review `src/feature_engineering.py` - understand feature preparation
-3. Study `src/model_utils.py` - learn model training process
-4. Read `notebooks/01_EDA.ipynb` - explore data patterns
+3. Study `src/pipeline.py` - the end-to-end modeling pipeline
+4. Read `notebooks/02_Model_Training.ipynb` - training with the pipeline
 
 ### Understanding ML Concepts
 1. **Classification**: Binary prediction problem

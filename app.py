@@ -460,7 +460,7 @@ def page_model_details():
             )
         ])
         fig.update_layout(
-            title="Feature Importance (Random Forest)",
+            title=f"Permutation Feature Importance — {metadata.get('model', 'model')}",
             xaxis_title="Importance Score",
             yaxis_title="Feature",
             height=500,
