@@ -1,13 +1,30 @@
 # 🔮 Customer Churn Prediction
 
-End-to-end machine-learning project that predicts telecom customer churn and serves predictions through an interactive Streamlit app.
+End-to-end machine-learning project that predicts telecom customer churn and serves predictions through an interactive Streamlit app and a FastAPI service.
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.8-orange.svg)
-![Tests](https://img.shields.io/badge/tests-8%20passing-brightgreen.svg)
+[![CI](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/dinfalabs/customer-churn-prediction/actions/workflows/ci.yml)
+![Tests](https://img.shields.io/badge/tests-16%20passing-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=dinfalabs/customer-churn-prediction&branch=main&mainModule=app.py)
 
-> **Status:** working demo / portfolio project. The model is trained and evaluated on the real Telco dataset (ROC-AUC ≈ 0.85). It is **not** deployed to a production environment — see the [Roadmap](#-roadmap) for what productionizing would require.
+> **Status:** working demo / portfolio project. The model is trained and evaluated on the real Telco dataset (ROC-AUC ≈ 0.85). Deploy your own copy in one click with the badge above.
+
+### 🛠️ Case study: from a broken model to ROC-AUC 0.85
+
+This project began as an **audit**. The originally shipped model was *non-functional* — trained on synthetic random data, it predicted "No Churn" for **every** customer, while a train/serve bug silently dropped 5 of the app's inputs. A refactor (real data + a single fit-once / serve-once pipeline) fixed it:
+
+| Metric (real test set) | Before | After |
+|---|---|---|
+| ROC-AUC | 0.49 (random) | **0.847** |
+| Recall (churners caught) | 0.00 | **0.797** |
+| F1-score | 0.00 | **0.611** |
+| Customers flagged as churn | 0 / 7,043 | realistic |
+
+Every prediction ships with a **per-customer explanation** (exact linear SHAP values):
+
+![Per-customer explanation](screenshots/fig_explanation_example.png)
 
 ---
 
@@ -16,9 +33,13 @@ End-to-end machine-learning project that predicts telecom customer churn and ser
 - [Dataset](#-dataset)
 - [Project Structure](#-project-structure)
 - [Architecture](#-architecture)
+- [Visuals](#-visuals)
 - [Installation](#-installation)
 - [Usage](#-usage)
+- [API Service](#-api-service)
+- [Deployment](#-deployment)
 - [Model Performance](#-model-performance)
+- [Business Impact](#-business-impact)
 - [Key Churn Drivers](#-key-churn-drivers)
 - [Testing](#-testing)
 - [Roadmap](#-roadmap)
@@ -74,7 +95,10 @@ customer-churn-prediction/
 ├── notebooks/
 │   ├── 01_EDA.ipynb
 │   └── 02_Model_Training.ipynb  # mirrors train_model.py using the pipeline
-└── tests/                     # pytest: feature eng, train/serve guard, perf gate
+├── service/                   # FastAPI scoring service (main.py)
+├── tests/                     # pytest: feature eng, guards, perf gate, API
+├── Dockerfile                 # container image for the API
+└── .github/workflows/ci.yml   # CI: install deps + run pytest
 ```
 
 ---
@@ -88,6 +112,20 @@ FeatureEngineer  →  ColumnTransformer( numeric: impute + scale | categorical: 
 ```
 
 It is fitted once in `train_model.py` and serialized as `models/churn_pipeline.pkl`. Both the app and any consumer call `pipeline.predict_proba(raw_dataframe)` — feature engineering, encoding and scaling all happen **inside** the fitted object. Because nothing is re-fitted at inference time, training and serving are guaranteed to transform inputs identically, and `OneHotEncoder(handle_unknown="ignore")` keeps single-row / unseen categories safe.
+
+---
+
+## 📸 Visuals
+
+| Churn rate by contract | Model comparison |
+|:---:|:---:|
+| ![churn by contract](screenshots/fig_churn_by_contract.png) | ![model comparison](screenshots/fig_model_comparison.png) |
+
+| Confusion matrix (deployed model) | Permutation feature importance |
+|:---:|:---:|
+| ![confusion matrix](screenshots/fig_confusion_matrix.png) | ![feature importance](screenshots/fig_feature_importance.png) |
+
+*All figures are reproducible: `python scripts/generate_figures.py`.*
 
 ---
 
@@ -148,6 +186,59 @@ print(f"Churn probability: {proba:.1%}")
 
 ---
 
+## 🌐 API Service
+
+A FastAPI service (`service/main.py`) exposes the same pipeline over HTTP.
+
+```bash
+# Local
+uvicorn service.main:app --reload          # interactive docs at /docs
+
+# Docker
+docker build -t churn-api .
+docker run -p 8000:8000 churn-api
+```
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness + which model is loaded |
+| `GET` | `/model` | Model metadata (metrics, version, timestamp) |
+| `POST` | `/predict` | Score one customer |
+| `POST` | `/predict/batch` | Score up to 1,000 customers |
+
+Requests are validated with **Pydantic** (allowed categories + numeric ranges → automatic `422` on bad input):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
+  "gender":"Male","SeniorCitizen":1,"Partner":"No","Dependents":"No","tenure":1,
+  "PhoneService":"Yes","MultipleLines":"No","InternetService":"Fiber optic",
+  "OnlineSecurity":"No","OnlineBackup":"No","DeviceProtection":"No","TechSupport":"No",
+  "StreamingTV":"Yes","StreamingMovies":"Yes","Contract":"Month-to-month",
+  "PaperlessBilling":"Yes","PaymentMethod":"Electronic check",
+  "MonthlyCharges":95.0,"TotalCharges":190.0
+}'
+# -> {"churn":true,"churn_probability":0.9388,"risk":"high"}
+```
+
+---
+
+## ▶️ Deployment
+
+**Streamlit Community Cloud (free, ~2 minutes):**
+1. Push this repo to GitHub.
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → select this repo, branch `main`, main file `app.py`.
+3. Under *Advanced settings* pick Python 3.12+, then **Deploy**.
+
+The app loads the committed `models/churn_pipeline.pkl`, so no training runs on the server. The "Open in Streamlit" badge at the top pre-fills this form.
+
+**API via Docker (any container host):**
+```bash
+docker build -t churn-api .
+docker run -p 8000:8000 churn-api      # then POST to http://localhost:8000/predict
+```
+
+---
+
 ## 📈 Model Performance
 
 Measured on the held-out 20% test set (1,409 customers). Two models are trained; the best is selected by **cross-validated ROC-AUC on the training split** (no test leakage).
@@ -163,6 +254,21 @@ Measured on the held-out 20% test set (1,409 customers). Two models are trained;
 
 ---
 
+## 💰 Business Impact
+
+Why recall matters in money terms (illustrative — plug in your own numbers):
+
+- Base: **7,043** customers, churn ≈ **26.5%** → ~**1,869** churners/year.
+- The model surfaces **~80%** of them (~1,490) *before* they leave, so retention budget targets only flagged high-risk customers instead of the whole base.
+- Average revenue ≈ **$777/customer/year** (avg monthly charge × 12).
+- If a targeted campaign retains just **30%** of the true at-risk customers it reaches:
+
+  > `0.30 × 1,490 × $777 ≈ $347k/year` of revenue protected (before campaign cost).
+
+The exact figure isn't the point — the model turns an undifferentiated retention budget into **targeted, measurable spend**.
+
+---
+
 ## 💡 Key Churn Drivers
 
 Top features by **permutation importance** (mean ROC-AUC drop when shuffled):
@@ -174,6 +280,8 @@ Top features by **permutation importance** (mean ROC-AUC drop when shuffled):
 
 **Retention takeaways:** incentivize longer contracts, invest in first-year onboarding, and investigate fiber-optic service/price satisfaction.
 
+Beyond global drivers, every individual prediction comes with a **per-customer explanation** (exact linear SHAP values) — see the *"Why this prediction?"* panel in the app and `src/explain.py`.
+
 ---
 
 ## 🧪 Testing
@@ -182,10 +290,13 @@ Top features by **permutation importance** (mean ROC-AUC drop when shuffled):
 pytest -q
 ```
 
-8 tests covering:
+14 tests covering:
 - **Feature engineering** — `TotalServices`, `ContractRisk` mappings
 - **Train/serve guard** — a high-risk profile must score clearly higher than a low-risk one (catches the input-dropping skew bug)
 - **Performance gate** — reads `metadata.json` and fails if ROC-AUC < 0.78 or recall < 0.45 (catches a model that degenerates to the majority class)
+- **API** — health, prediction shape, high-vs-low ordering, Pydantic validation (`422`), batch scoring
+
+Continuous integration (`.github/workflows/ci.yml`) installs dependencies and runs the suite on every push and pull request.
 
 ---
 
@@ -196,13 +307,14 @@ pytest -q
 - ✅ Single fit-once / serve-once pipeline (no train/serve skew)
 - ✅ CV-based model selection, class-imbalance handling
 - ✅ Non-regression test gate; notebook aligned to the pipeline
+- ✅ FastAPI scoring service (`/predict`, `/predict/batch`) + Docker
+- ✅ CI (GitHub Actions: pytest)
+- ✅ Per-customer explanations (linear SHAP values)
 
 **Next**
 - [ ] More algorithms (XGBoost / LightGBM) + hyperparameter search
-- [ ] SHAP explanations and decision-threshold tuning for the business case
-- [ ] FastAPI scoring service (`/predict`, `/predict/batch`) + Docker
 - [ ] Model registry / versioning, drift detection, scheduled retraining
-- [ ] CI (pytest + ruff + black)
+- [ ] Linting in CI (ruff + black)
 
 ---
 

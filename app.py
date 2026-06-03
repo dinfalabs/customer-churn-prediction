@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.data_loader import load_telco_data
 # FeatureEngineer must be importable so joblib can reconstruct the saved pipeline.
 from src.pipeline import FeatureEngineer  # noqa: F401
+from src.explain import explain_customer, supports_explanation
 
 # Configuration
 st.set_page_config(
@@ -407,7 +408,27 @@ def page_prediction():
                 - Offer relevant upsell opportunities
                 - Encourage loyalty programs
                 """)
-        
+
+            # Per-customer explanation (linear SHAP values)
+            if supports_explanation(pipeline):
+                st.markdown("### 🔍 Why this prediction?")
+                contrib = explain_customer(
+                    pipeline, pd.DataFrame([customer_data])
+                ).head(8).iloc[::-1]
+                exp_fig = go.Figure(go.Bar(
+                    x=contrib["contribution"], y=contrib["feature"], orientation="h",
+                    marker=dict(color=["#e74c3c" if c > 0 else "#2ecc71"
+                                       for c in contrib["contribution"]]),
+                ))
+                exp_fig.update_layout(
+                    title="Feature contributions (red = increases churn risk, green = reduces)",
+                    xaxis_title="Contribution to churn log-odds",
+                    height=380, margin=dict(l=10, r=10, t=40, b=10),
+                )
+                st.plotly_chart(exp_fig, use_container_width=True)
+                st.caption("Exact contributions from the linear model (linear SHAP values): "
+                           "with the intercept they sum to the predicted churn log-odds.")
+
         except Exception:
             st.error("❌ Unable to generate a prediction for these inputs. "
                      "Please review the values and try again.")
