@@ -1,4 +1,4 @@
-# 🔮 Customer Churn Prediction
+# Customer Churn Prediction
 
 End-to-end machine-learning project that predicts telecom customer churn and serves predictions through an interactive Streamlit app and a FastAPI service.
 
